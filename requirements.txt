@@ -1,0 +1,8 @@
+numpy
+pandas
+yfinance
+ta
+scikit-learn
+matplotlib
+tensorflow
+lightgbm

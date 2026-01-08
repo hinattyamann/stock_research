@@ -1,0 +1,18 @@
+[project]
+name = "stock-pred-graduation"
+version = "0.1.0"
+requires-python = ">=3.10"
+dependencies = []
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+extend-select = ["I"]  # import sorting only
+# We do not auto-fix in CI by default to avoid any accidental behavior changes.
+
+[tool.black]
+line-length = 100
+target-version = ["py310"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

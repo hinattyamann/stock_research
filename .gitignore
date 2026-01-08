@@ -1,0 +1,9 @@
+__pycache__/
+.venv/
+.pytest_cache/
+*.pyc
+*.pyo
+*.pyd
+.DS_Store
+**/figs/
+**/run_summary.json
