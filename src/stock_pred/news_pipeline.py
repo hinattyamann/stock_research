@@ -80,7 +80,7 @@ DEFAULT_NEWS_API_SENT_COLS = DEFAULT_NEWS_TONE_COLS
 REQUIRED_COLS = ["published_at", "url"]  # GKG-only: title は特徴量に使わないため必須にしない
 
 # featureset / cache key version（特徴量定義を変えたら更新する）
-NEWS_FEAT_CACHE_VER = "v4"
+NEWS_FEAT_CACHE_VER = "v5"
 
 def _parse_close_minutes(market_close_time: str) -> int:
     hh, mm = market_close_time.strip().split(":")
@@ -148,7 +148,7 @@ def load_news(path: str) -> pd.DataFrame:
     else:
         df["tone"] = pd.to_numeric(df.get("tone"), errors="coerce")
     # GKG由来の追加数値列（存在すれば numeric 化しておく）
-    for c in ("tone_pos", "tone_neg", "tone_pol", "tone_wc", "gkg_numarts"):
+    for c in ("tone_pos", "tone_neg", "tone_pol", "tone_act", "tone_self", "tone_wc", "gkg_numarts"):
         if c in df.columns:
             df[c] = pd.to_numeric(df.get(c), errors="coerce")
 
@@ -323,8 +323,12 @@ def featurize_news_daily(
         # （取得できない記事もあるので、NaNは無視して集計する）
         tmp["tone"] = pd.to_numeric(tmp.get("tone"), errors="coerce")
         tmp["tone_abs"] = tmp["tone"].abs()
-        tmp["tone_pos"] = (tmp["tone"] > 0).astype(float)
-        tmp["tone_neg"] = (tmp["tone"] < 0).astype(float)
+        # NOTE:
+        #   `tone_pos/tone_neg` は GKG V2Tone の Positive/Negative Score を格納する列名として
+        #   raw CSV で使っているため、ここで上書きしない（列名衝突バグの原因）。
+        #   "toneが正/負だったか" は別名で持つ。
+        tmp["tone_dir_pos"] = (tmp["tone"] > 0).astype(float)
+        tmp["tone_dir_neg"] = (tmp["tone"] < 0).astype(float)
 
         g2 = tmp.groupby("trade_date")
         tone = pd.DataFrame(index=g2.size().index)
@@ -339,8 +343,8 @@ def featurize_news_daily(
         tone["news_tone_max_0d"] = g2["tone"].max().fillna(0.0).astype(float)
         tone["news_tone_abs_mean_0d"] = g2["tone_abs"].mean().fillna(0.0).astype(float)
 
-        tone_pos = g2["tone_pos"].sum().astype(float)
-        tone_neg = g2["tone_neg"].sum().astype(float)
+        tone_pos = g2["tone_dir_pos"].sum().astype(float)
+        tone_neg = g2["tone_dir_neg"].sum().astype(float)
         tone["news_tone_pos_ratio_0d"] = (tone_pos / (valid_cnt + 1e-9)).fillna(0.0)
         tone["news_tone_neg_ratio_0d"] = (tone_neg / (valid_cnt + 1e-9)).fillna(0.0)
 
