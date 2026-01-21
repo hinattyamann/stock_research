@@ -116,8 +116,8 @@ class DataConfig:
     # 図・CSVの出力先
     output_root: str = "Logistic_Regression/figs"
 
-    use_news: bool = False
-    news_path: str = "data/news/raw/{ticker}.csv"
+    use_news: bool = True
+    news_path: str = "data/news/raw_gkg_test/{ticker}.csv"
     news_cache_dir: str = "data/news/features"
     news_tz: str = "Asia/Tokyo"
     news_market_close_time: str = "15:30"
