@@ -22,3 +22,12 @@ data/news/**/*.zip
 data/news/**/*.gz
 data/news/**/*.parquet
 data/news/**/*.csv
+
+transformer/figs/trinary/*.png
+transformer/figs/trinary/*.csv
+LightGBM/figs/trinary/*.png
+LightGBM/figs/trinary/*.csv
+Logistic_Regression/figs/trinary/*.png
+Logistic_Regression/figs/trinary/*.csv
+LSTM/figs/trinary/*.png
+LSTM/figs/trinary/*.csv

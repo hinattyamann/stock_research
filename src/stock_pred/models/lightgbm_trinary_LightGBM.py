@@ -93,8 +93,8 @@ def fetch_ohlcv(ticker: str, start: str, end: str) -> pd.DataFrame:
 @dataclass
 class DataConfig:
     ticker: str = "7203.T"
-    start: str = "2001-01-01"
-    end: str   = "2024-12-31"
+    start: str = "2013-04-01"       # 取得開始日
+    end: str = "2025-12-31"         # 取得終了日
     horizon: int = 1
     win: int = 60
     top_p: float = 0.10

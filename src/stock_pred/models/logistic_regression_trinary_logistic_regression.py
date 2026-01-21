@@ -91,8 +91,8 @@ LOGCFG = LogConfig(
 class DataConfig:
     """データ前処理と特徴量派生・出力先など、データ寄りの設定集。"""
     ticker: str = "7203.T"          # 対象ティッカー
-    start: str = "2001-01-01"       # 取得開始日
-    end: str = "2024-12-31"         # 取得終了日
+    start: str = "2013-04-01"       # 取得開始日
+    end: str = "2025-12-31"         # 取得終了日
     horizon: int = 1                # 何日先(H)を予測するか
     win: int = 60                   # 時系列窓幅(Transformerへの入力長)
     top_p: float = 0.10             # 異常サブセット評価(|r_H|上位p%)
@@ -755,7 +755,6 @@ def main():
         n_classes = 3 if TASK == "trinary" else 2
         fold_rec = {
             "fold": int(fold),
-            "mi_selected": mi_selected_info,
             "counts_raw": {
                 "tr_in": int(len(abs_tr_in_idx)),
                 "iv_in": int(len(abs_iv_in_idx)),
