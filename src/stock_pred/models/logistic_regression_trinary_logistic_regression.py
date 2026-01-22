@@ -2,8 +2,7 @@ EPS = 1e-8     # 0除算を避けるための極小値
 
 TASK  = "trinary"   # このコードは三値分類専用
 if TASK != "trinary":
-    raise SystemExit("[ERROR] This script is trinary-only. Please use binary_transformer.py for binary classification.")
-
+    raise SystemExit("[ERROR] This script is trinary-only. Please use the binary-classification script if you need TASK=binary.")
 #TOPIXは欠損時など一時的に無効化できるフラグを用意
 USE_TOPIX_FEATURES = False  # falseで無効
 
@@ -28,7 +27,7 @@ from sklearn.feature_selection import mutual_info_classif
 # DL
 import tensorflow as tf
 from tensorflow.keras import Model
-from tensorflow.keras.layers import Input, Dense, Dropout, LayerNormalization, MultiHeadAttention, GlobalAveragePooling1D, Lambda
+from tensorflow.keras.layers import Input, Dense, GlobalAveragePooling1D, Lambda
 
 # plots
 import matplotlib.pyplot as plt
@@ -94,7 +93,7 @@ class DataConfig:
     start: str = "2013-04-01"       # 取得開始日
     end: str = "2025-12-31"         # 取得終了日
     horizon: int = 1                # 何日先(H)を予測するか
-    win: int = 60                   # 時系列窓幅(Transformerへの入力長)
+    win: int = 60                   # 時系列窓幅（過去T日分を入力にする長さ）
     top_p: float = 0.10             # 異常サブセット評価(|r_H|上位p%)
     k_tau: float = 0.3              # 三値ラベリングの閾値スケール係数
 
@@ -106,7 +105,7 @@ class DataConfig:
     best_win: int | None = None     # SWEEP結果のベスト記録用変数
 
     # 前処理
-    pooling: str = "last"           # Transformer出力の集約方式("avg" of "last")
+    pooling: str = "last"           # 窓の集約方式（"avg": 平均, "last": 最終時刻）
     use_log1p: bool = True          # 非負量にLog1p派生を追加するか
     log1p_candidates: list[str] = field(default_factory=lambda: [
         "sigma5","sigma20","bb_width","atr","atr_ratio","range_ma_ratio",
@@ -116,7 +115,7 @@ class DataConfig:
     # 図・CSVの出力先
     output_root: str = "Logistic_Regression/figs"
 
-    use_news: bool = True
+    use_news: bool = False
     news_path: str = "data/news/raw_gkg_test/{ticker}.csv"
     news_cache_dir: str = "data/news/features"
     news_tz: str = "Asia/Tokyo"
@@ -166,19 +165,10 @@ class TrainConfig:
     #MDAの反復回数
     mda_repeats: int = 3
 
-@dataclass
-class ModelConfig:
-    """Transformerブロックの主ハイパラ。"""
-    dropout: float   = 0.2      # Attention/FFN後のドロップアウト率
-    head_size: int   = 64       # MHAのkey_dim (埋め込みの次元分割の基準)
-    num_heads: int   = 4        # マルチヘッド数
-    ff_dim: int      = 128      # FFNの中間層ユニット数
-
 # グローバル設定オブジェクト
 DATA = DataConfig()
 SPLIT = SplitConfig()
 TRAIN = TrainConfig()
-MODEL = ModelConfig()
 
 def make_cosine_lr_callback(base_lr: float, alpha: float, total_epochs: int):
     """Cosine Annealing（エポック単位）。最小学習率 = base_lr * alpha。
@@ -205,32 +195,7 @@ def mi_select(Xtr_df: pd.DataFrame, ytr: np.ndarray, thr: float = 1e-4) -> List[
     feats = s[s > thr].index.tolist()
     return feats if len(feats) > 0 else Xtr_df.columns.tolist()
 
-# ---------- Transformer ----------
-class PositionalEncoding(tf.keras.layers.Layer):
-    """
-    位置エンコーディング（Sin/Cosの固定埋め込み）。
-    - 連続的な時系列順序情報を、特徴埋め込みへ足し込むレイヤ。
-    - 事前計算した (1, T, D) のテンソルを forward で加算するだけなので軽量。
-    """
-    def __init__(self, seq_len, d_model):
-        super().__init__()
-        pos = np.arange(seq_len)[:, None]       # 位置 0..T-1 (T, 1)
-        i = np.arange(d_model)[None, :]         # 次元 0..D-1 (1, D)
-        angle_rates = 1 / np.power(10000, (2 * (i//2)) / np.float32(d_model))
-        angle_rads = pos * angle_rates          # (T, D)
-
-        # 偶数次元は sin、奇数次元は cos
-        angle_rads[:, 0::2] = np.sin(angle_rads[:, 0::2])
-        angle_rads[:, 1::2] = np.cos(angle_rads[:, 1::2])
-
-        # (1, T, D) にして保存（学習しない固定PE）
-        self.pe = tf.constant(angle_rads[None, ...], dtype=tf.float32)
-
-    def call(self, x):  # (B,T,D)
-        # バッチ全体に同じPEを加算（Tは実際の系列長でトリム）
-        return x + self.pe[:, :tf.shape(x)[1], :]
-
-def transformer_model(win: int, fdim: int, n_classes: int) -> tf.keras.Model:
+def logistic_regression_model(win: int, fdim: int, n_classes: int) -> tf.keras.Model:
     # Logistic Regression: linear classifier over pooled features
     inp = Input(shape=(win, fdim))
     if DATA.pooling == "avg":
@@ -258,75 +223,6 @@ def transformer_model(win: int, fdim: int, n_classes: int) -> tf.keras.Model:
         optimizer=tf.keras.optimizers.Adam(learning_rate=TRAIN.lr),
         loss=loss_fn,
         metrics=metrics,
-    )
-    return m
-    """
-    シンプルなEncoder風ブロック ×2 層のTransformer分類器。
-    - 入力: (B, T=win, F=fdim)
-    - 構造: [LN → MHA → Dropout → 残差] → [LN → FFN → Dropout → 残差] を2回
-    - プーリング: avg または last（設定 DATA.pooling に従う）
-    - 出力: 2値は sigmoid、3値は softmax（label smoothing はオプション）
-    """
-    inp = Input(shape=(win, fdim))
-    x = PositionalEncoding(win, fdim)(inp)
-
-    # --- Encoderブロック ×2 ---
-    for _ in range(2):
-        # ブロック1: Self-Attention
-        res = x
-        x = LayerNormalization(epsilon=1e-6)(x)
-        x = MultiHeadAttention(
-            num_heads=MODEL.num_heads, 
-            key_dim=MODEL.head_size,
-            output_shape=(fdim,),       # 出力次元を元のfdimに合わせて残差接続可能に
-            dropout=MODEL.dropout
-            )(x, x)
-        x = Dropout(MODEL.dropout)(x)
-        x = x + res                     # 残差
-
-        # ブロック2: Position-wise FFN
-        res2 = x
-        x = LayerNormalization(epsilon=1e-6)(x)
-        x = Dense(MODEL.ff_dim, activation="relu")(x)
-        x = Dropout(MODEL.dropout)(x)
-        x = Dense(fdim)(x)              # 元次元に戻す（残差接続のため）
-        x = x + res2
-
-    # --- 出力前の正規化 ---
-    x = LayerNormalization(epsilon=1e-6)(x)
-    
-    # --- プーリング選択 ---
-    if DATA.pooling == "avg":
-        # 全タイムステップの平均（系列全体の情報を滑らかに集約）
-        x = GlobalAveragePooling1D(name="pool_avg")(x)
-    elif DATA.pooling == "last":
-        # 最終タイムステップのみ（直近情報を重視）
-        x = Lambda(lambda t: t[:, -1, :], name="pool_last")(x)
-    else:
-        raise ValueError(f"Unknown POOLING: {DATA.pooling}. Use 'avg' or 'last'.")
-    
-    x = Dropout(MODEL.dropout)(x)
-
-    # --- 出力層と損失 ---
-    if n_classes == 2:
-        # 2値分類（出力1ユニットの確率）
-        out = Dense(1, activation="sigmoid")(x)
-        loss_fn = tf.keras.losses.BinaryCrossentropy()
-        metrics = ["accuracy", tf.keras.metrics.AUC(name="roc_auc")]
-    else:
-        # 3値分類
-        out = Dense(n_classes, activation="softmax")(x)
-        loss_fn = (tf.keras.losses.CategoricalCrossentropy(label_smoothing=TRAIN.label_smoothing_eps)
-                   if TRAIN.use_label_smoothing 
-                   else tf.keras.losses.SparseCategoricalCrossentropy()
-        )
-        metrics = ["accuracy"]
-
-    m = Model(inp, out)
-    m.compile(
-        optimizer=tf.keras.optimizers.Adam(learning_rate=TRAIN.lr),
-        loss=loss_fn,
-        metrics=metrics
     )
     return m
 
@@ -545,7 +441,7 @@ def main():
         use_topix_features=USE_TOPIX_FEATURES,
         use_log1p=DATA.use_log1p,
         log1p_candidates=DATA.log1p_candidates,
-        extra_log1p_cols=("vix_log1p",),   # Transformerでは手動拾いがあったので維持
+        extra_log1p_cols=("vix_log1p",),   # 旧実装互換のため明示的に追加
         nan_tail_days=120,
     )
     y_all = y_all_np  # 以降の既存コードが y_all を使うので上書きして互換維持
@@ -602,13 +498,13 @@ def main():
         Xtr = scaler.transform(Xtr_df[feats].values)
         Xva = scaler.transform(pd.DataFrame(X_all[va_idx], columns=feature_cols_final)[feats].values)
 
-        # ② 時系列→窓（Transformer入力形状へ）
+        # ② 時系列→窓（(T,F)の系列入力を作る）
         Xtr_win, ytr_win = to_windows(Xtr, ytr, DATA.win)
         Xva_win, yva_win = to_windows(Xva, y_all[va_idx], DATA.win)
         abs_va_win = abs_all[va_idx][DATA.win:]         # サブセット抽出用（|r_H|上位p%）
 
         # ③ モデルと不均衡対策
-        # ===== Inner/Outer split to match transformer_old (override windows & feats) =====
+        # ===== Inner/Outer split to match legacy behavior (override windows & feats) =====
         try:
             INNER_VAL_FRAC = 0.20
             MIN_INNER_VAL  = 64
@@ -650,7 +546,7 @@ def main():
             print(f"[SPLIT][WARN] inner/outer override failed: {_e}")
 
         n_classes = 3 if TASK == "trinary" else 2
-        model = transformer_model(DATA.win, Xtr_win.shape[-1], n_classes)
+        model = logistic_regression_model(DATA.win, Xtr_win.shape[-1], n_classes)
         class_weights = _compute_class_weights(ytr_win)
 
         # ④ EarlyStoppingのチューニング（必要時は fold=1 だけで実施）
@@ -660,7 +556,7 @@ def main():
             for p in TRAIN.es_patience_grid:
                 for d in TRAIN.es_mindelta_grid:
                     tf.random.set_seed(42); np.random.seed(42)
-                    tmp_model = transformer_model(DATA.win, Xtr_win.shape[-1], n_classes)
+                    tmp_model = logistic_regression_model(DATA.win, Xtr_win.shape[-1], n_classes)
                     tmp_es = tf.keras.callbacks.EarlyStopping(
                         monitor = "val_loss", mode = "min",
                         patience = p, min_delta = d,

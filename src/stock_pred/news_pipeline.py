@@ -68,6 +68,14 @@ DEFAULT_NEWS_TONE_COLS = [
     "news_v2tone_pol_sum_0d",
     "news_v2tone_pol_3bd_mean",
     "news_v2tone_pol_5bd_mean",
+    "news_v2tone_act_mean_0d",
+    "news_v2tone_act_sum_0d",
+    "news_v2tone_act_3bd_mean",
+    "news_v2tone_act_5bd_mean",
+    "news_v2tone_self_mean_0d",
+    "news_v2tone_self_sum_0d",
+    "news_v2tone_self_3bd_mean",
+    "news_v2tone_self_5bd_mean",
     "news_v2tone_wc_mean_0d",
     "news_v2tone_wc_sum_0d",
     "news_v2tone_wc_3bd_mean",
@@ -80,7 +88,7 @@ DEFAULT_NEWS_API_SENT_COLS = DEFAULT_NEWS_TONE_COLS
 REQUIRED_COLS = ["published_at", "url"]  # GKG-only: title は特徴量に使わないため必須にしない
 
 # featureset / cache key version（特徴量定義を変えたら更新する）
-NEWS_FEAT_CACHE_VER = "v5"
+NEWS_FEAT_CACHE_VER = "v6"
 
 def _parse_close_minutes(market_close_time: str) -> int:
     hh, mm = market_close_time.strip().split(":")
@@ -356,11 +364,13 @@ def featurize_news_daily(
             tone[f"news_tone_{w}bd_mean"] = (roll_sum / (roll_cnt + 1e-9)).fillna(0.0)
         tone = tone.drop(columns=["tone_cnt"])
 
-        # --- GKG V2Tone components（pos/neg/pol/wc） ---
+        # --- GKG V2Tone components（pos/neg/pol/act/self/wc） ---
         v2_specs = [
             ("tone_pos", "pos"),
             ("tone_neg", "neg"),
             ("tone_pol", "pol"),
+            ("tone_act", "act"),
+            ("tone_self", "self"),
             ("tone_wc", "wc"),
         ]
         v2 = pd.DataFrame(index=g2.size().index)

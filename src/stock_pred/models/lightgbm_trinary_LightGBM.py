@@ -116,7 +116,7 @@ class DataConfig:
     output_root: str = "LightGBM/figs"
 
     # ---- News features (early fusion) ----
-    use_news: bool = True
+    use_news: bool = False
     news_path: str = "data/news/raw_gkg_test/{ticker}.csv"
     news_cache_dir: str = "data/news/features"
     news_tz: str = "Asia/Tokyo"
